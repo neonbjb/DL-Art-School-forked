@@ -153,15 +153,15 @@ def define_D_net(opt_net, img_sz=None):
         netD = SRGAN_arch.Discriminator_switched(in_nc=opt_net['in_nc'], nf=opt_net['nf'], initial_temp=opt_net['initial_temp'],
                                                     final_temperature_step=opt_net['final_temperature_step'])
     elif which_model == "cross_compare_vgg128":
-        netD = SRGAN_arch.CrossCompareDiscriminator(in_nc=opt_net['in_nc'], nf=opt_net['nf'], scale=opt_net['scale'])
+        netD = SRGAN_arch.CrossCompareDiscriminator(in_nc=opt_net['in_nc'], nf=opt_net['nf'], scale=opt_net['scale'], in_nc_ref=opt_net['in_nc_ref'])
     else:
         raise NotImplementedError('Discriminator model [{:s}] not recognized'.format(which_model))
     return netD
 
 # Discriminator
-def define_D(opt):
+def define_D(opt, key='network_D'):
     img_sz = opt['datasets']['train']['target_size']
-    opt_net = opt['network_D']
+    opt_net = opt[key]
     return define_D_net(opt_net, img_sz)
 
 def define_fixed_D(opt):
