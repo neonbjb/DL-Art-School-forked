@@ -768,10 +768,6 @@ class SRGANModel(BaseModel):
                     fake_H_wave = self.get_wave(fake_H).detach()
                     var_ref_wave = self.get_wave(var_ref)
                     var_L = F.interpolate(var_L, size=var_ref_wave.shape[2:], mode="nearest")
-                    # Inject some noise.
-                    wnoise = torch.randn_like(var_ref_wave, device=self.device) * .002
-                    var_ref_wave += wnoise
-                    fake_H_wave += wnoise
                     if self.opt['train']['gan_type'] == 'crossgan':
                         pred_d_real_wave = self.netD_wave(var_ref_wave, var_L)
                         pred_d_fake_wave = self.netD_wave(fake_H_wave, var_L)   # Tensor already detached above.
