@@ -198,13 +198,14 @@ def define_F(opt, use_bn=False, for_training=False, load_path=None):
         else:
             feature_layer = 34
         if for_training:
-            netF = feature_arch.TrainableVGGFeatureExtractor(feature_layer=feature_layer, use_bn=use_bn,
+            netF = feature_arch.TrainableVGGFeatureExtractorWithQuality(feature_layer=feature_layer, use_bn=use_bn,
                                                   use_input_norm=True, device=device)
         else:
             netF = feature_arch.VGGFeatureExtractor(feature_layer=feature_layer, use_bn=use_bn,
                                                     use_input_norm=True, device=device)
     elif opt['train']['which_model_F'] == 'wide_resnet':
         netF = feature_arch.WideResnetFeatureExtractor(use_input_norm=True, device=device)
+
 
     if load_path:
         # Load the model parameters:

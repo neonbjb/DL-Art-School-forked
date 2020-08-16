@@ -30,6 +30,7 @@ class FeatureModel(BaseModel):
 
             # loss
             self.cri_fea = nn.MSELoss().to(self.device)
+            self.cri_qual = nn.L1Loss().to(self.device)
 
             # optimizers
             wd_G = train_opt['weight_decay_G'] if train_opt['weight_decay_G'] else 0
@@ -72,14 +73,24 @@ class FeatureModel(BaseModel):
 
     def optimize_parameters(self, step):
         self.optimizer_G.zero_grad()
-        self.fake_H = self.fea_train(self.var_L, interpolate_factor=2)
+        self.fake_L, qual_L = self.fea_train(self.var_L, interpolate_factor=2)
+        self.fake_H, qual_H = self.fea_train(self.real_H, interpolate_factor=1)
         ref_H = self.net_ref(self.real_H)
-        l_fea = self.cri_fea(self.fake_H, ref_H)
-        l_fea.backward()
+        l_fea_l = self.cri_fea(self.fake_L, ref_H)
+        l_fea_h = self.cri_fea(self.fake_H, ref_H)
+        l_qual_l = self.cri_qual(qual_L, torch.full_like(qual_L, fill_value=.1))
+        l_qual_h = self.cri_qual(qual_H, torch.full_like(qual_H, fill_value=.9))
+
+        l_fea_total = l_fea_l + l_fea_h * .5 + l_qual_h * .3 + l_qual_l * .3
+        l_fea_total.backward()
         self.optimizer_G.step()
 
         # set log
-        self.log_dict['l_fea'] = l_fea.item()
+        self.log_dict['l_fea_l'] = l_fea_l.item()
+        self.log_dict['l_fea_h'] = l_fea_h.item()
+        self.log_dict['l_qual_l'] = l_qual_l.item()
+        self.log_dict['l_qual_h'] = l_qual_h.item()
+        self.log_dict['l_fea_total'] = l_fea_total.item()
 
     def test(self):
         pass
