@@ -120,6 +120,6 @@ def check_resume(opt, resume_iter):
                                                        '{}_D.pth'.format(resume_iter))
             logger.info('Set [pretrain_model_D] to ' + opt['path']['pretrain_model_D'])
         if 'spsr' in opt['model']:
-            opt['path']['pretrain_model_D_grad'] = osp.join(opt['path']['models'],
-                                                       '{}_D_grad.pth'.format(resume_iter))
-            logger.info('Set [pretrain_model_D_grad] to ' + opt['path']['pretrain_model_D_grad'])
+            opt['path']['pretrain_model_D_wave'] = osp.join(opt['path']['models'],
+                                                       '{}_D_wave.pth'.format(resume_iter))
+            logger.info('Set [pretrain_model_D_wave] to ' + opt['path']['pretrain_model_D_grad'])
