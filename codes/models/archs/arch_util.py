@@ -4,6 +4,7 @@ import torch.nn.init as init
 import torch.nn.functional as F
 import torch.nn.utils.spectral_norm as SpectralNorm
 from math import sqrt
+from pytorch_wavelets import DWTForward, DWTInverse
 
 def pixel_norm(x, epsilon=1e-8):
     return x * torch.rsqrt(torch.mean(torch.pow(x, 2), dim=1, keepdims=True) + epsilon)
@@ -457,3 +458,14 @@ class UpconvBlock(nn.Module):
     def forward(self, x):
         x = F.interpolate(x, scale_factor=2, mode="nearest")
         return self.process(x)
+
+class ExtractDiscreteWavelet(nn.Module):
+    def __init__(self, passno=1):
+        super(ExtractDiscreteWavelet, self).__init__()
+        self.transform = DWTForward(J=passno+1, mode='periodization', wave='db3')
+
+    def forward(self, x):
+        residual, hi = self.transform(x)
+        x = hi[-1]
+        b, c, d, w, h = x.shape
+        return x.view(b, c*d, w, h)

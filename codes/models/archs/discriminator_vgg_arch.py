@@ -159,12 +159,18 @@ class CrossCompareBlock(nn.Module):
 
 
 class CrossCompareDiscriminator(nn.Module):
-    def __init__(self, in_nc, nf, scale=4):
+    def __init__(self, in_nc, nf, in_nc_ref=None, scale=4):
         super(CrossCompareDiscriminator, self).__init__()
-        assert scale == 2 or scale == 4
+        assert scale == 1 or scale == 2 or scale == 4
+        if in_nc_ref is None:
+            in_nc_ref = in_nc
 
-        self.init_conv_hr = ConvGnLelu(in_nc, nf, stride=2, norm=False, bias=True, activation=True)
-        self.init_conv_lr = ConvGnLelu(in_nc, nf, stride=1, norm=False, bias=True, activation=True)
+        if scale != 1:
+            strd_1 = 2
+        else:
+            strd_1 = 1
+        self.init_conv_hr = ConvGnLelu(in_nc, nf, stride=strd_1, norm=False, bias=True, activation=True)
+        self.init_conv_lr = ConvGnLelu(in_nc_ref, nf, stride=1, norm=False, bias=True, activation=True)
         if scale == 4:
             strd_2 = 2
         else:
