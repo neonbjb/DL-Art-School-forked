@@ -15,17 +15,17 @@ def main():
     mode = 'single'  # single (one input folder) | pair (extract corresponding GT and LR pairs)
     split_img = False
     opt = {}
-    opt['n_thread'] = 20
+    opt['n_thread'] = 10
     opt['compression_level'] = 3  # 3 is the default value in cv2
     # CV_IMWRITE_PNG_COMPRESSION from 0 to 9. A higher value means a smaller size and longer
     # compression time. If read raw images during training, use 0 for faster IO speed.
     if mode == 'single':
-        opt['input_folder'] = 'F:\\4k6k\\datasets\\flickr2k\\Flickr2K_HR'
-        opt['save_folder'] = 'F:\\4k6k\\datasets\\flickr2k\\1024px'
-        opt['crop_sz'] = 1024  # the size of each sub-image
-        opt['step'] = 880  # step of the sliding crop window
-        opt['thres_sz'] = 240  # size threshold
-        opt['resize_final_img'] = 1
+        opt['input_folder'] = 'F:\\4k6k\\datasets\\images\\youtube\\images\\food'
+        opt['save_folder'] = 'F:\\4k6k\\datasets\\images\\youtube\\tiled\\food'
+        opt['crop_sz'] = 736  # the size of each sub-image
+        opt['step'] = 512  # step of the sliding crop window
+        opt['thres_sz'] = 64  # size threshold
+        opt['resize_final_img'] = .5
         opt['only_resize'] = False
         extract_single(opt, split_img)
     elif mode == 'pair':
@@ -85,7 +85,8 @@ def extract_single(opt, split_img=False):
         os.makedirs(save_folder)
         print('mkdir [{:s}] ...'.format(save_folder))
     img_list = data_util._get_paths_from_images(input_folder)
-
+    # If this fails, change it and the imwrite below to the write extension.
+    assert ".png" in img_list[0]
     def update(arg):
         pbar.update(arg)
 
@@ -163,8 +164,6 @@ def worker(path, opt, split_mode=False, left_img=True):
             else:
                 crop_img = img[x:x + crop_sz, y:y + crop_sz, :]
             crop_img = np.ascontiguousarray(crop_img)
-            # If this fails, change it and the imwrite below to the write extension.
-            assert ".png" in img_name
             if 'resize_final_img' in opt.keys():
                 # Resize too.
                 resize_factor = opt['resize_final_img']
