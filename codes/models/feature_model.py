@@ -81,7 +81,7 @@ class FeatureModel(BaseModel):
         l_qual_l = self.cri_qual(qual_L, torch.full_like(qual_L, fill_value=.1))
         l_qual_h = self.cri_qual(qual_H, torch.full_like(qual_H, fill_value=.9))
 
-        l_fea_total = l_fea_l + l_fea_h * .5 + l_qual_h * .3 + l_qual_l * .3
+        l_fea_total = l_fea_l + l_fea_h * .4 + l_qual_h * .3 + l_qual_l * .3
         l_fea_total.backward()
         self.optimizer_G.step()
 

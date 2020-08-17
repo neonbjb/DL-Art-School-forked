@@ -37,7 +37,10 @@ class SRGANModel(BaseModel):
             self.netD = networks.define_D(opt).to(self.device)
             if self.spsr_enabled:
                 self.netD_grad = networks.define_D(opt).to(self.device)
-                self.netD_wave = networks.define_D(opt, key="network_Dwave").to(self.device)
+                if 'network_Dwave' in opt.keys():
+                    self.netD_wave = networks.define_D(opt, key="network_Dwave").to(self.device)
+                else:
+                    self.netD_wave = None
 
         if 'network_C' in opt.keys():
             self.netC = networks.define_G(opt, net_key='network_C').to(self.device)
@@ -48,7 +51,7 @@ class SRGANModel(BaseModel):
         else:
             self.netC = None
         self.mega_batch_factor = 1
-        self.disjoint_data = False
+        self.disjoint_data = opt['disjoint'] if 'disjoint' in opt.keys() else False
 
         # define losses, optimizer and scheduler
         if self.is_train:
@@ -138,8 +141,7 @@ class SRGANModel(BaseModel):
                 self.netF = networks.define_F(opt, use_bn=False).to(self.device)
                 self.lr_netF = None
                 if 'lr_fea_path' in train_opt.keys():
-                    self.lr_netF = networks.define_F(opt, use_bn=False, load_path=train_opt['lr_fea_path']).to(self.device)
-                    self.disjoint_data = True
+                    self.lr_netF = networks.define_F(opt, use_bn=False, load_path=train_opt['lr_fea_path'], which_net=train_opt['which_lr_fea']).to(self.device)
                     # crossgan relies on matching lr/hr image pairs
                     assert self.opt['train']['gan_type'] != 'crossgan'
 
@@ -215,7 +217,6 @@ class SRGANModel(BaseModel):
                     else:
                         if self.rank <= 0:
                             logger.warning('Params [{:s}] will not optimize.'.format(k))
-                # D
                 wd_D = train_opt['weight_decay_D'] if train_opt['weight_decay_D'] else 0
                 self.optimizer_D_grad = torch.optim.Adam(optim_params, lr=train_opt['lr_D'],
                                                     weight_decay=wd_D,
@@ -223,29 +224,37 @@ class SRGANModel(BaseModel):
                 self.optimizers.append(self.optimizer_D_grad)
                 self.disc_optimizers.append(self.optimizer_D_grad)
 
-                # D_grad optimizer
-                optim_params = []
-                for k, v in self.netD_wave.named_parameters():  # can optimize for a part of the model
-                    if v.requires_grad:
-                        optim_params.append(v)
-                    else:
-                        if self.rank <= 0:
-                            logger.warning('Params [{:s}] will not optimize.'.format(k))
-                self.optimizer_D_wave = torch.optim.Adam(optim_params, lr=train_opt['lr_D'],
-                                                    weight_decay=wd_D,
-                                                    betas=(train_opt['beta1_D'], train_opt['beta2_D']))
-                self.optimizers.append(self.optimizer_D_wave)
-                self.disc_optimizers.append(self.optimizer_D_wave)
+                if self.netD_wave is not None:
+                    # D_wave optimizer
+                    optim_params = []
+                    for k, v in self.netD_wave.named_parameters():  # can optimize for a part of the model
+                        if v.requires_grad:
+                            optim_params.append(v)
+                        else:
+                            if self.rank <= 0:
+                                logger.warning('Params [{:s}] will not optimize.'.format(k))
+                    self.optimizer_D_wave = torch.optim.Adam(optim_params, lr=train_opt['lr_D'],
+                                                        weight_decay=wd_D,
+                                                        betas=(train_opt['beta1_D'], train_opt['beta2_D']))
+                    self.optimizers.append(self.optimizer_D_wave)
+                    self.disc_optimizers.append(self.optimizer_D_wave)
 
             if self.spsr_enabled:
                 self.get_grad = ImageGradient().to(self.device)
                 self.get_grad_nopadding = ImageGradientNoPadding().to(self.device)
-                self.get_wave = ExtractDiscreteWavelet(passno=1).to(self.device)
-                [self.netG, self.netD, self.netD_grad, self.netD_wave, self.get_grad, self.get_grad_nopadding, self.get_wave], \
-                [self.optimizer_G, self.optimizer_D, self.optimizer_D_grad, self.optimizer_D_wave] = \
-                    amp.initialize([self.netG, self.netD, self.netD_grad, self.netD_wave, self.get_grad, self.get_grad_nopadding, self.get_wave],
-                                   [self.optimizer_G, self.optimizer_D, self.optimizer_D_grad, self.optimizer_D_wave],
-                                   opt_level=self.amp_level, num_losses=4)
+                if self.netD_wave is not None:
+                    self.get_wave = ExtractDiscreteWavelet(passno=1).to(self.device)
+                    [self.netG, self.netD, self.netD_grad, self.netD_wave, self.get_grad, self.get_grad_nopadding, self.get_wave], \
+                    [self.optimizer_G, self.optimizer_D, self.optimizer_D_grad, self.optimizer_D_wave] = \
+                        amp.initialize([self.netG, self.netD, self.netD_grad, self.netD_wave, self.get_grad, self.get_grad_nopadding, self.get_wave],
+                                       [self.optimizer_G, self.optimizer_D, self.optimizer_D_grad, self.optimizer_D_wave],
+                                       opt_level=self.amp_level, num_losses=4)
+                else:
+                    [self.netG, self.netD, self.netD_grad, self.get_grad, self.get_grad_nopadding], \
+                    [self.optimizer_G, self.optimizer_D, self.optimizer_D_grad] = \
+                        amp.initialize([self.netG, self.netD, self.netD_grad, self.get_grad, self.get_grad_nopadding],
+                                       [self.optimizer_G, self.optimizer_D, self.optimizer_D_grad],
+                                       opt_level=self.amp_level, num_losses=4)
             else:
                 # AMP
                 [self.netG, self.netD], [self.optimizer_G, self.optimizer_D] = \
@@ -268,7 +277,8 @@ class SRGANModel(BaseModel):
                 self.netD.train()
                 if self.spsr_enabled:
                     self.netD_grad.train()
-                    self.netD_wave.train()
+                    if self.netD_wave is not None:
+                        self.netD_wave.train()
 
             # schedulers
             if train_opt['lr_scheme'] == 'MultiStepLR':
@@ -378,8 +388,9 @@ class SRGANModel(BaseModel):
         if self.spsr_enabled:
             for p in self.netD_grad.parameters():
                 p.requires_grad = False
-            for p in self.netD_wave.parameters():
-                p.requires_grad = False
+            if self.netD_wave is not None:
+                for p in self.netD_wave.parameters():
+                    p.requires_grad = False
 
         self.swapout_D(step)
         self.swapout_G(step)
@@ -536,20 +547,21 @@ class SRGANModel(BaseModel):
                     l_g_total += l_g_gan_grad + l_g_gan_grad_branch
 
                 # wavelet disc
-                if self.spsr_enabled and self.cri_grad_gan:
-                    fake_wave = self.get_wave(fake_GenOut)
-                    if self.opt['train']['gan_type'] == 'crossgan':
-                        pred_g_fake_grad = self.netD_wave(fake_wave, F.interpolate(var_L, size=fake_wave.shape[2:], mode="nearest"))
-                    else:
-                        pred_g_fake_grad = self.netD_wave(fake_wave)
-                    if self.opt['train']['gan_type'] in ['gan', 'pixgan', 'pixgan_fea', 'crossgan']:
-                        l_g_gan_wave = self.l_gan_grad_w * self.cri_grad_gan(pred_g_fake_grad, True)
-                    elif self.opt['train']['gan_type'] == 'ragan':
-                        pred_g_real_grad = self.netD_wave(self.get_wave(var_ref)).detach()
-                        l_g_gan_wave = self.l_gan_wave_w * (
-                            self.cri_gan(pred_g_real_grad - torch.mean(pred_g_fake_grad), False) +
-                            self.cri_gan(pred_g_fake_grad - torch.mean(pred_g_real_grad), True)) / 2
-                    l_g_total += l_g_gan_wave
+                if self.netD_wave is not None:
+                    if self.spsr_enabled and self.cri_grad_gan:
+                        fake_wave = self.get_wave(fake_GenOut)
+                        if self.opt['train']['gan_type'] == 'crossgan':
+                            pred_g_fake_grad = self.netD_wave(fake_wave, F.interpolate(var_L, size=fake_wave.shape[2:], mode="nearest"))
+                        else:
+                            pred_g_fake_grad = self.netD_wave(fake_wave)
+                        if self.opt['train']['gan_type'] in ['gan', 'pixgan', 'pixgan_fea', 'crossgan']:
+                            l_g_gan_wave = self.l_gan_grad_w * self.cri_grad_gan(pred_g_fake_grad, True)
+                        elif self.opt['train']['gan_type'] == 'ragan':
+                            pred_g_real_grad = self.netD_wave(self.get_wave(var_ref)).detach()
+                            l_g_gan_wave = self.l_gan_wave_w * (
+                                self.cri_gan(pred_g_real_grad - torch.mean(pred_g_fake_grad), False) +
+                                self.cri_gan(pred_g_fake_grad - torch.mean(pred_g_real_grad), True)) / 2
+                        l_g_total += l_g_gan_wave
 
                 # Scale the loss down by the batch factor.
                 l_g_total_log = l_g_total
@@ -760,37 +772,38 @@ class SRGANModel(BaseModel):
                 self.optimizer_D_grad.step()
 
             # D_wave.
-            if self.spsr_enabled and self.cri_grad_gan and step >= self.G_warmup:
-                for p in self.netD_wave.parameters():
-                    p.requires_grad = True
-                self.optimizer_D_wave.zero_grad()
-                for var_L, var_ref, fake_H in zip(self.var_L, var_ref_skips, self.fake_H):
-                    fake_H_wave = self.get_wave(fake_H).detach()
-                    var_ref_wave = self.get_wave(var_ref)
-                    var_L = F.interpolate(var_L, size=var_ref_wave.shape[2:], mode="nearest")
-                    if self.opt['train']['gan_type'] == 'crossgan':
-                        pred_d_real_wave = self.netD_wave(var_ref_wave, var_L)
-                        pred_d_fake_wave = self.netD_wave(fake_H_wave, var_L)   # Tensor already detached above.
-                    else:
-                        pred_d_real_wave = self.netD_wave(var_ref_wave)
-                        pred_d_fake_wave = self.netD_wave(fake_H_wave)   # Tensor already detached above.
-                    if self.opt['train']['gan_type'] == 'gan' or self.opt['train']['gan_type'] == 'crossgan':
-                        l_d_real_wave = self.cri_gan(pred_d_real_wave, True)
-                        l_d_fake_wave = self.cri_gan(pred_d_fake_wave, False)
-                    elif self.opt['train']['gan_type'] == 'pixgan':
-                        real = torch.ones_like(pred_d_real_wave)
-                        fake = torch.zeros_like(pred_d_fake_wave)
-                        l_d_real_wave = self.cri_gan(pred_d_real_wave, real)
-                        l_d_fake_wave = self.cri_gan(pred_d_fake_wave, fake)
-                    elif self.opt['train']['gan_type'] == 'ragan':
-                        l_d_real_wave = self.cri_gan(pred_d_real_wave - torch.mean(pred_d_fake_wave), True)
-                        l_d_fake_wave = self.cri_gan(pred_d_fake_wave - torch.mean(pred_d_real_wave), False)
+            if self.netD_wave is not None:
+                if self.spsr_enabled and self.cri_grad_gan and step >= self.G_warmup:
+                    for p in self.netD_wave.parameters():
+                        p.requires_grad = True
+                    self.optimizer_D_wave.zero_grad()
+                    for var_L, var_ref, fake_H in zip(self.var_L, var_ref_skips, self.fake_H):
+                        fake_H_wave = self.get_wave(fake_H).detach()
+                        var_ref_wave = self.get_wave(var_ref)
+                        var_L = F.interpolate(var_L, size=var_ref_wave.shape[2:], mode="nearest")
+                        if self.opt['train']['gan_type'] == 'crossgan':
+                            pred_d_real_wave = self.netD_wave(var_ref_wave, var_L)
+                            pred_d_fake_wave = self.netD_wave(fake_H_wave, var_L)   # Tensor already detached above.
+                        else:
+                            pred_d_real_wave = self.netD_wave(var_ref_wave)
+                            pred_d_fake_wave = self.netD_wave(fake_H_wave)   # Tensor already detached above.
+                        if self.opt['train']['gan_type'] == 'gan' or self.opt['train']['gan_type'] == 'crossgan':
+                            l_d_real_wave = self.cri_gan(pred_d_real_wave, True)
+                            l_d_fake_wave = self.cri_gan(pred_d_fake_wave, False)
+                        elif self.opt['train']['gan_type'] == 'pixgan':
+                            real = torch.ones_like(pred_d_real_wave)
+                            fake = torch.zeros_like(pred_d_fake_wave)
+                            l_d_real_wave = self.cri_gan(pred_d_real_wave, real)
+                            l_d_fake_wave = self.cri_gan(pred_d_fake_wave, fake)
+                        elif self.opt['train']['gan_type'] == 'ragan':
+                            l_d_real_wave = self.cri_gan(pred_d_real_wave - torch.mean(pred_d_fake_wave), True)
+                            l_d_fake_wave = self.cri_gan(pred_d_fake_wave - torch.mean(pred_d_real_wave), False)
 
-                    l_d_total_wave = (l_d_real_wave + l_d_fake_wave) / 2
-                    l_d_total_wave /= self.mega_batch_factor
-                    with amp.scale_loss(l_d_total_wave, self.optimizer_D_wave, loss_id=3) as l_d_total_wave_scaled:
-                        l_d_total_wave_scaled.backward()
-                self.optimizer_D_wave.step()
+                        l_d_total_wave = (l_d_real_wave + l_d_fake_wave) / 2
+                        l_d_total_wave /= self.mega_batch_factor
+                        with amp.scale_loss(l_d_total_wave, self.optimizer_D_wave, loss_id=3) as l_d_total_wave_scaled:
+                            l_d_total_wave_scaled.backward()
+                    self.optimizer_D_wave.step()
 
 
         # Log sample images from first microbatch.
@@ -849,8 +862,9 @@ class SRGANModel(BaseModel):
                     self.add_log_entry('l_g_pix_grad_branch', l_g_pix_grad_branch.detach().item())
                 if self.cri_grad_gan:
                     self.add_log_entry('l_g_gan_grad', l_g_gan_grad.detach().item())
-                    self.add_log_entry('l_g_gan_wave', l_g_gan_wave.detach().item())
                     self.add_log_entry('l_g_gan_grad_branch', l_g_gan_grad_branch.detach().item())
+                    if self.netD_wave is not None:
+                        self.add_log_entry('l_g_gan_wave', l_g_gan_wave.detach().item())
         if self.l_gan_w > 0 and step >= self.G_warmup:
             self.add_log_entry('l_d_real', l_d_real_log.detach().item())
             self.add_log_entry('l_d_fake', l_d_fake_log.detach().item())
@@ -859,10 +873,11 @@ class SRGANModel(BaseModel):
             if self.spsr_enabled:
                 self.add_log_entry('l_d_real_grad', l_d_real_grad.detach().item())
                 self.add_log_entry('l_d_fake_grad', l_d_fake_grad.detach().item())
-                self.add_log_entry('l_d_real_wave', l_d_real_wave.detach().item())
-                self.add_log_entry('l_d_fake_wave', l_d_fake_wave.detach().item())
                 self.add_log_entry('D_fake_grad', torch.mean(pred_d_fake_grad.detach()))
                 self.add_log_entry('D_diff_grad', torch.mean(pred_d_fake_grad.detach()) - torch.mean(pred_d_real_grad.detach()))
+                if self.netD_wave is not None:
+                    self.add_log_entry('l_d_real_wave', l_d_real_wave.detach().item())
+                    self.add_log_entry('l_d_fake_wave', l_d_fake_wave.detach().item())
 
         # Log learning rates.
         for i, pg in enumerate(self.optimizer_G.param_groups):
@@ -1043,10 +1058,11 @@ class SRGANModel(BaseModel):
             if self.opt['is_train'] and load_path_D_grad is not None:
                 logger.info('Loading pretrained model for D_grad [{:s}] ...'.format(load_path_D_grad))
                 self.load_network(load_path_D_grad, self.netD_grad)
-            load_path_D_wave = self.opt['path']['pretrain_model_D_wave']
-            if self.opt['is_train'] and load_path_D_wave is not None:
-                logger.info('Loading pretrained model for D_wave [{:s}] ...'.format(load_path_D_wave))
-                self.load_network(load_path_D_wave, self.netD_wave)
+            if self.netD_wave is not None:
+                load_path_D_wave = self.opt['path']['pretrain_model_D_wave']
+                if self.opt['is_train'] and load_path_D_wave is not None:
+                    logger.info('Loading pretrained model for D_wave [{:s}] ...'.format(load_path_D_wave))
+                    self.load_network(load_path_D_wave, self.netD_wave)
 
     def load_random_corruptor(self):
         if self.netC is None:
@@ -1061,4 +1077,5 @@ class SRGANModel(BaseModel):
         self.save_network(self.netD, 'D', iter_step)
         if self.spsr_enabled:
             self.save_network(self.netD_grad, 'D_grad', iter_step)
-            self.save_network(self.netD_wave, 'D_wave', iter_step)
+            if self.netD_wave is not None:
+                self.save_network(self.netD_wave, 'D_wave', iter_step)
