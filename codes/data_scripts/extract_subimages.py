@@ -20,12 +20,12 @@ def main():
     # CV_IMWRITE_PNG_COMPRESSION from 0 to 9. A higher value means a smaller size and longer
     # compression time. If read raw images during training, use 0 for faster IO speed.
     if mode == 'single':
-        opt['input_folder'] = 'F:\\4k6k\\datasets\\images\\youtube\\images\\food'
-        opt['save_folder'] = 'F:\\4k6k\\datasets\\images\\youtube\\tiled\\food'
-        opt['crop_sz'] = 736  # the size of each sub-image
-        opt['step'] = 512  # step of the sliding crop window
+        opt['input_folder'] = 'F:\\4k6k\\datasets\\images\\flickr\\flickr-scrape\\filtered'
+        opt['save_folder'] = 'F:\\4k6k\\datasets\\images\\flickr\\flickr-scrape\\tiled384'
+        opt['crop_sz'] = 384  # the size of each sub-image
+        opt['step'] = 256  # step of the sliding crop window
         opt['thres_sz'] = 64  # size threshold
-        opt['resize_final_img'] = .5
+        opt['resize_final_img'] = 1
         opt['only_resize'] = False
         extract_single(opt, split_img)
     elif mode == 'pair':
@@ -78,6 +78,10 @@ def main():
         raise ValueError('Wrong mode.')
 
 
+def worker_err(err):
+    raise err
+
+
 def extract_single(opt, split_img=False):
     input_folder = opt['input_folder']
     save_folder = opt['save_folder']
@@ -86,7 +90,7 @@ def extract_single(opt, split_img=False):
         print('mkdir [{:s}] ...'.format(save_folder))
     img_list = data_util._get_paths_from_images(input_folder)
     # If this fails, change it and the imwrite below to the write extension.
-    assert ".png" in img_list[0]
+    assert ".jpg" in img_list[0]
     def update(arg):
         pbar.update(arg)
 
@@ -95,10 +99,10 @@ def extract_single(opt, split_img=False):
     pool = Pool(opt['n_thread'])
     for path in img_list:
         if split_img:
-            pool.apply_async(worker, args=(path, opt, True, False), callback=update)
-            pool.apply_async(worker, args=(path, opt, True, True), callback=update)
+            pool.apply_async(worker, args=(path, opt, True, False), callback=update, error_callback=worker_err)
+            pool.apply_async(worker, args=(path, opt, True, True), callback=update, error_callback=worker_err)
         else:
-            pool.apply_async(worker, args=(path, opt), callback=update)
+            pool.apply_async(worker, args=(path, opt), callback=update, error_callback=worker_err)
     pool.close()
     pool.join()
     print('All subprocesses done.')
@@ -121,8 +125,8 @@ def worker(path, opt, split_mode=False, left_img=True):
         raise ValueError('Wrong image shape - {}'.format(n_channels))
        
     # Uncomment to filter any image that doesnt meet a threshold size.
-    if min(h,w) < 1024:
-        return
+    #if min(h,w) < 1024:
+    #    return
 
     left = 0
     right = w
@@ -137,9 +141,13 @@ def worker(path, opt, split_mode=False, left_img=True):
     img = img[:, left:right]
 
     h_space = np.arange(0, h - crop_sz + 1, step)
+    if len(h_space) == 0:
+        return
     if h - (h_space[-1] + crop_sz) > thres_sz:
         h_space = np.append(h_space, h - crop_sz)
     w_space = np.arange(0, w - crop_sz + 1, step)
+    if len(w_space) == 0:
+        return
     if w - (w_space[-1] + crop_sz) > thres_sz:
         w_space = np.append(w_space, w - crop_sz)
 
@@ -156,6 +164,7 @@ def worker(path, opt, split_mode=False, left_img=True):
             crop_sz = w
 
     index = 0
+    produced = 0
     for x in h_space:
         for y in w_space:
             index += 1
@@ -172,8 +181,9 @@ def worker(path, opt, split_mode=False, left_img=True):
                 crop_img = cv2.resize(crop_img, dsize, interpolation = cv2.INTER_AREA)
             cv2.imwrite(
                 osp.join(opt['save_folder'],
-                         img_name.replace('.png', '_l{:05d}_s{:03d}.png'.format(left, index))), crop_img,
+                         img_name.replace('.jpg', '_l{:05d}_s{:03d}.jpg'.format(left, index))), crop_img,
                 [cv2.IMWRITE_PNG_COMPRESSION, opt['compression_level']])
+            produced += 1
     return 'Processing {:s} ...'.format(img_name)
 
 
